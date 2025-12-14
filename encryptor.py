@@ -1,10 +1,10 @@
 import os
 import sys
 import argparse
-import random # New Import for generating random data
+import random 
 from cryptography.fernet import Fernet
 
-# --- 1. Core Security Functions ---
+#1. Core Security Functions
 
 def generate_key(key_file="secret.key"):
     """Generates a Fernet key and saves it to a file."""
@@ -18,7 +18,7 @@ def load_key(key_file="secret.key"):
     try:
         with open(key_file, "rb") as f:
             return f.read()
-        # 
+        
     except FileNotFoundError:
         print(f"[ERROR] Key file '{key_file}' not found. Generate a key first.")
         sys.exit(1)
@@ -50,7 +50,7 @@ def secure_delete(file_path, passes=3):
         print(f"[ERROR] Secure deletion failed for {file_path}: {e}")
         return False
 
-# --- 2. Cryptography and Processing Functions ---
+#  2. Cryptography and Processing Functions 
 
 def process_file(file_path, key, mode='encrypt', secure_del=False):
     """Helper function to perform encryption or decryption on a single file."""
@@ -128,7 +128,7 @@ def process_directory(path, key, mode, secure_del=False):
     print(f"Finished {mode}ing {processed_count} files.")
 
 
-# --- 3. Main Execution and Argument Parsing (Updated) ---
+# 3. Main Execution and Argument Parsing (Updated)
 
 def main():
     parser = argparse.ArgumentParser(
