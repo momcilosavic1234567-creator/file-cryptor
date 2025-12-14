@@ -22,6 +22,60 @@ def load_key(key_file="secret.key"):
         print(f"[ERROR] Key file '{key_file}' not found. Generate a key first.")
         sys.exit(1)
 
+def process_file(file_path, key, mode='encrypt'):
+    """Helper function to perform encryption or decryption on a single file."""
+    f = Fernet(key)
+    action = f.encrypt if mode == 'encrypt' else f.decrypt
+    action_verb = "encrypted" if mode == 'encrypt' else "decrypted"
+
+    try:
+        with open(file_path, "rb") as original_file:
+            original_data = original_file.read()
+        
+        processed_data = action(original_data)
+
+        with open(file_path, "wb") as processed_file:
+            processed_file.write(processed_data)
+        
+        print(f"[{action_verb.upper()}] {file_path}")
+        return True
+    
+    except FileNotFoundError:
+        print(f"[ERROR] File not found: {file_path}")
+    except Exception as e:
+        # Catch InvalidToken error on decryption attempt with wrong key/corrupted data
+        if mode == 'decrypt' and 'InvalidToken' in str(e):
+            print(f"[FAILED] {file_path} (Decryption failed: wrong key or corrupted data)")
+        else:
+            print(f"[FAILED] {file_path} ({e})")
+    return False
+
+# Recursive Directory Processing Function
+
+def process_directory(path, key, mode):
+    ignore_files = ['secret.key', 'encryptor.py', 'requirements.txt', '.gitignore']
+
+    print("-" * 50)
+    print(f"Starting {mode}ion of directory: {path}")
+    print("-" * 50)
+
+    if not os.path.exists(path):
+        print(f"[ERROR] Path is not a valid directory: {path}")
+        return
+    
+    processed_count = 0
+
+    # os.walk generates the file names in a directory tree
+    for root, dirs, files in os.walk(path):
+        for file_name in files:
+            if file_name not in ignore_files:
+                file_path = os.path.join(root, file_name)
+                if process_file(file_path, key, mode):
+                    processed_count += 1
+
+    print("-" * 50)
+    print(f"Finished {mode}ing {processed_count} files.")
+
 def encrypt_file(file_path, key):
     """Reads a file and encrypts its contents and overwrites the original file."""
     f = Fernet(key)
@@ -67,51 +121,55 @@ def main():
     parser = argparse.ArgumentParser(
         description="Simple CLI tool for Fernet file encryption/decryption."
     )
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    # Subparser for key generation
-    key_parser = subparsers.add_parser('key', help='Generate a new secret encryption key')
+    
+    subparsers = parser.add_subparsers(dest='command', required=True)
+    
+    # Sub-parser for KEY generation (No change)
+    key_parser = subparsers.add_parser('key', help='Generate a new secret encryption key.')
     key_parser.add_argument(
-        '-k', '--keyfile',
-        default='secret.key',
+        '-k', '--keyfile', 
+        default='secret.key', 
         help='Name of the key file to create (default: secret.key)'
     )
-
-    # Subparser for encryption
-    enc_parser = subparsers.add_parser('enc', help='Encrypt a file')
+    
+    # Sub-parser for ENCRYPT (Updated to use 'path' and process directory/file)
+    enc_parser = subparsers.add_parser('enc', help='Encrypt a file or an entire directory.')
     enc_parser.add_argument(
-        'file',
-        help='Path to the file to encrypt'
+        'path', 
+        help='Path to the file or directory to encrypt.'
     )
     enc_parser.add_argument(
-        '-k', '--keyfile',
-        default='secret.key',
+        '-k', '--keyfile', 
+        default='secret.key', 
         help='Path to the key file (default: secret.key)'
     )
-
-    # Subparser for decryption
-    dec_parser = subparsers.add_parser('dec', help='Decrypt a file')
+    
+    # Sub-parser for DECRYPT (Updated to use 'path' and process directory/file)
+    dec_parser = subparsers.add_parser('dec', help='Decrypt a file or an entire directory.')
     dec_parser.add_argument(
-        'file',
-        help='Path to the file to decrypt'
+        'path', 
+        help='Path to the file or directory to decrypt.'
     )
     dec_parser.add_argument(
-        '-k', '--keyfile',
-        default='secret.key',
+        '-k', '--keyfile', 
+        default='secret.key', 
         help='Path to the key file (default: secret.key)'
     )
-
+    
     args = parser.parse_args()
-
+    
     if args.command == 'key':
         generate_key(args.keyfile)
-    elif args.command == 'enc':
+    elif args.command == 'enc' or args.command == 'dec':
+        mode = 'encrypt' if args.command == 'enc' else 'decrypt'
         key = load_key(args.keyfile)
-        encrypt_file(args.file, key)
-    elif args.command == 'dec':
-        key = load_key(args.keyfile)
-        decrypt_file(args.file, key)
-    
-if __name__ == "__main__":
+        
+        if os.path.isdir(args.path):
+            process_directory(args.path, key, mode)
+        else:
+            # If it's a file, just process the single file
+            process_file(args.path, key, mode)
+
+
+if __name__ == '__main__':
     main()
