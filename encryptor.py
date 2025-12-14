@@ -1,121 +1,134 @@
 import os
 import sys
 import argparse
+import random # New Import for generating random data
 from cryptography.fernet import Fernet
 
-# Core Cryptography Functions
+# --- 1. Core Security Functions ---
 
 def generate_key(key_file="secret.key"):
-    """Generate a new Fernet key."""
+    """Generates a Fernet key and saves it to a file."""
     key = Fernet.generate_key()
-    with open(key_file, 'wb') as f:
+    with open(key_file, "wb") as f:
         f.write(key)
-    print(f"[SUCCESS] Key generated and saved to {key_file}")
-
+    print(f"[SUCCESS] New key generated and saved to: {key_file}")
+    
 def load_key(key_file="secret.key"):
     """Loads the key from the specified file."""
     try:
         with open(key_file, "rb") as f:
-            # ADDED .strip() to remove potential leading/trailing whitespace/newlines
-            return f.read().strip() 
+            return f.read()
+        # 
     except FileNotFoundError:
         print(f"[ERROR] Key file '{key_file}' not found. Generate a key first.")
         sys.exit(1)
 
-def process_file(file_path, key, mode='encrypt'):
+def secure_delete(file_path, passes=3):
+    """
+    Overwrites a file with random data multiple times before deleting it.
+    This prevents easy recovery of the original data.
+    """
+    if not os.path.exists(file_path):
+        return
+
+    try:
+        file_size = os.path.getsize(file_path)
+        
+        with open(file_path, "wb") as f:
+            for _ in range(passes):
+                # Seek to the beginning and overwrite with random bytes
+                f.seek(0)
+                random_data = os.urandom(file_size)
+                f.write(random_data)
+                f.flush() # Force write to disk
+                
+        os.remove(file_path) # Finally, delete the file's directory entry
+        print(f"[SECURE_DELETE] {file_path}")
+        return True
+    
+    except Exception as e:
+        print(f"[ERROR] Secure deletion failed for {file_path}: {e}")
+        return False
+
+# --- 2. Cryptography and Processing Functions ---
+
+def process_file(file_path, key, mode='encrypt', secure_del=False):
     """Helper function to perform encryption or decryption on a single file."""
+    
+    # Check if the file should be securely deleted AFTER encryption
+    if mode == 'encrypt' and secure_del:
+        temp_file_path = file_path + ".temp_original"
+        # Rename original file so we can encrypt the newly created file later
+        os.rename(file_path, temp_file_path)
+    else:
+        temp_file_path = file_path # In decryption mode or non-secure encryption, we work on the original file
+    
+    # Load key and set action
     f = Fernet(key)
     action = f.encrypt if mode == 'encrypt' else f.decrypt
     action_verb = "encrypted" if mode == 'encrypt' else "decrypted"
-
+    
     try:
-        with open(file_path, "rb") as original_file:
+        with open(temp_file_path, "rb") as original_file:
             original_data = original_file.read()
         
         processed_data = action(original_data)
-
-        with open(file_path, "wb") as processed_file:
-            processed_file.write(processed_data)
         
+        # Write processed data (encrypted or decrypted)
+        if mode == 'encrypt' and secure_del:
+             # If securely deleting, write encrypted data to the original file name
+             with open(file_path, "wb") as processed_file:
+                 processed_file.write(processed_data)
+             
+             # Securely delete the temporary file containing the original data
+             secure_delete(temp_file_path)
+        else:
+            # If decrypting or not using secure delete, overwrite the temp/original file
+            with open(temp_file_path, "wb") as processed_file:
+                processed_file.write(processed_data)
+            
         print(f"[{action_verb.upper()}] {file_path}")
         return True
-    
-    except FileNotFoundError:
-        print(f"[ERROR] File not found: {file_path}")
+
     except Exception as e:
-        # Catch InvalidToken error on decryption attempt with wrong key/corrupted data
-        if mode == 'decrypt' and 'InvalidToken' in str(e):
-            print(f"[FAILED] {file_path} (Decryption failed: wrong key or corrupted data)")
-        else:
-            print(f"[FAILED] {file_path} ({e})")
+        # Simplified error handling for brevity
+        print(f"[FAILED] {file_path} (Failed due to: {e})")
+        # If secure delete was set, attempt to recover the original name if temp exists
+        if mode == 'encrypt' and secure_del and os.path.exists(temp_file_path):
+            os.rename(temp_file_path, file_path)
+            print(f"[RECOVER] Restored original file name: {file_path}")
     return False
 
-# Recursive Directory Processing Function
 
-def process_directory(path, key, mode):
+def process_directory(path, key, mode, secure_del=False):
+    """Recursively walks a directory and processes all files."""
+    
     ignore_files = ['secret.key', 'encryptor.py', 'requirements.txt', '.gitignore']
-
+    
     print("-" * 50)
     print(f"Starting {mode}ion of directory: {path}")
+    print(f"Secure Delete: {'Yes' if secure_del and mode == 'encrypt' else 'No'}")
     print("-" * 50)
-
-    if not os.path.exists(path):
+    
+    if not os.path.isdir(path):
         print(f"[ERROR] Path is not a valid directory: {path}")
         return
-    
-    processed_count = 0
 
-    # os.walk generates the file names in a directory tree
+    processed_count = 0
+    
     for root, dirs, files in os.walk(path):
         for file_name in files:
             if file_name not in ignore_files:
                 file_path = os.path.join(root, file_name)
-                if process_file(file_path, key, mode):
+                # Pass the secure_del flag to the file processing function
+                if process_file(file_path, key, mode, secure_del): 
                     processed_count += 1
-
+                
     print("-" * 50)
     print(f"Finished {mode}ing {processed_count} files.")
 
-def encrypt_file(file_path, key):
-    """Reads a file and encrypts its contents and overwrites the original file."""
-    f = Fernet(key)
-    try:
-        with open(file_path, "rb") as original_file:
-            original_data = original_file.read()
 
-        encrypted_data = f.encrypt(original_data)
-
-        with open(file_path, "wb") as encrypted_file:
-            encrypted_file.write(encrypted_data)
-
-        print(f"[SUCCESS] File encrypted: {file_path}")
-    
-    except FileNotFoundError:
-        print(f"[ERROR] File not found: {file_path}")
-    except Exception as e:
-        print(f"[ERROR] Encryption failed: {e}")
-
-def decrypt_file(file_path, key):
-    """Reads an encrypted file and decrypts its contents and overwrites the original file."""
-    f = Fernet(key)
-    try:
-        with open(file_path, "rb") as encrypted_file:
-            encrypted_data = encrypted_file.read()
-
-        # The decrypt method handles the authentication check (MAC)
-        decrypted_data = f.decrypt(encrypted_data)
-
-        with open(file_path, "wb") as decrypted_file:
-            decrypted_file.write(decrypted_data)
-
-        print(f"[SUCCESS] File decrypted: {file_path}")
-    
-    except FileNotFoundError:
-        print(f"[ERROR] File not found: {file_path}")
-    except Exception as e:
-        print(f"[ERROR] Decryption failed. Check your key file or if the file is corrupted. {e}")
-
-# 2. Main execution and argument parsing
+# --- 3. Main Execution and Argument Parsing (Updated) ---
 
 def main():
     parser = argparse.ArgumentParser(
@@ -124,7 +137,7 @@ def main():
     
     subparsers = parser.add_subparsers(dest='command', required=True)
     
-    # Sub-parser for KEY generation (No change)
+    # Sub-parser for KEY generation
     key_parser = subparsers.add_parser('key', help='Generate a new secret encryption key.')
     key_parser.add_argument(
         '-k', '--keyfile', 
@@ -132,7 +145,7 @@ def main():
         help='Name of the key file to create (default: secret.key)'
     )
     
-    # Sub-parser for ENCRYPT (Updated to use 'path' and process directory/file)
+    # Sub-parser for ENCRYPT (Added --secure-delete flag)
     enc_parser = subparsers.add_parser('enc', help='Encrypt a file or an entire directory.')
     enc_parser.add_argument(
         'path', 
@@ -143,8 +156,13 @@ def main():
         default='secret.key', 
         help='Path to the key file (default: secret.key)'
     )
+    enc_parser.add_argument(
+        '--secure-delete', 
+        action='store_true', 
+        help='Use secure deletion on the original unencrypted file.'
+    )
     
-    # Sub-parser for DECRYPT (Updated to use 'path' and process directory/file)
+    # Sub-parser for DECRYPT (No change, secure deletion not applicable)
     dec_parser = subparsers.add_parser('dec', help='Decrypt a file or an entire directory.')
     dec_parser.add_argument(
         'path', 
@@ -164,11 +182,13 @@ def main():
         mode = 'encrypt' if args.command == 'enc' else 'decrypt'
         key = load_key(args.keyfile)
         
+        # Determine secure_delete setting (only applicable for 'enc' command)
+        secure_del = args.secure_delete if args.command == 'enc' else False
+        
         if os.path.isdir(args.path):
-            process_directory(args.path, key, mode)
+            process_directory(args.path, key, mode, secure_del)
         else:
-            # If it's a file, just process the single file
-            process_file(args.path, key, mode)
+            process_file(args.path, key, mode, secure_del)
 
 
 if __name__ == '__main__':
